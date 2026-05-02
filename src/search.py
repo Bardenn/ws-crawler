@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from difflib import get_close_matches
 import math
 import re
 
 from .indexer import InvertedIndex, TermStats, tokenize
+
+QUOTED_PHRASE_PATTERN = re.compile(r'"([^"]+)"')
 
 
 @dataclass(frozen=True)
@@ -20,6 +23,26 @@ class SearchResult:
     snippet: str
 
 
+@dataclass(frozen=True)
+class Query:
+    """Parsed user query containing individual terms and exact phrases."""
+
+    terms: list[str]
+    phrases: list[list[str]]
+
+    @property
+    def all_terms(self) -> list[str]:
+        terms: list[str] = []
+        for term in self.terms:
+            if term not in terms:
+                terms.append(term)
+        for phrase in self.phrases:
+            for term in phrase:
+                if term not in terms:
+                    terms.append(term)
+        return terms
+
+
 class SearchEngine:
     """Case-insensitive search over an :class:`InvertedIndex`."""
 
@@ -31,8 +54,9 @@ class SearchEngine:
         return self.index.postings_for(word)
 
     def find(self, query: str, limit: int | None = None) -> list[SearchResult]:
-        """Return pages containing every term in the query, ranked by score."""
-        terms = tokenize(query)
+        """Return pages matching every query term and quoted phrase."""
+        parsed_query = parse_query(query)
+        terms = parsed_query.all_terms
         if not terms:
             return []
 
@@ -44,20 +68,36 @@ class SearchEngine:
         for postings in posting_lists[1:]:
             candidate_urls &= set(postings)
 
-        results = [
-            self._score_document(url, terms)
-            for url in candidate_urls
-        ]
+        for phrase in parsed_query.phrases:
+            candidate_urls = {
+                url
+                for url in candidate_urls
+                if self._count_phrase_occurrences(url, phrase) > 0
+            }
+
+        results = [self._score_document(url, parsed_query) for url in candidate_urls]
         results.sort(key=lambda result: (-result.score, result.url))
         return results if limit is None else results[:limit]
 
-    def _score_document(self, url: str, terms: list[str]) -> SearchResult:
+    def suggest_terms(self, query: str, limit: int = 3) -> dict[str, list[str]]:
+        """Suggest close indexed terms for query tokens that are not present."""
+        suggestions: dict[str, list[str]] = {}
+        vocabulary = list(self.index.terms)
+        for term in parse_query(query).all_terms:
+            if term in self.index.terms:
+                continue
+            matches = get_close_matches(term, vocabulary, n=limit, cutoff=0.72)
+            if matches:
+                suggestions[term] = matches
+        return suggestions
+
+    def _score_document(self, url: str, query: Query) -> SearchResult:
         document = self.index.documents[url]
         score = 0.0
         matched_terms: list[str] = []
         total_docs = max(self.index.page_count, 1)
 
-        for term in terms:
+        for term in query.all_terms:
             stats = self.index.terms[term][url]
             document_frequency = len(self.index.terms[term])
             inverse_document_frequency = math.log(
@@ -67,16 +107,21 @@ class SearchEngine:
             score += term_frequency * inverse_document_frequency
             matched_terms.append(term)
 
-        phrase_occurrences = self._count_phrase_occurrences(url, terms)
-        if len(terms) > 1 and phrase_occurrences:
-            score += 2.0 + (0.25 * phrase_occurrences)
+        for phrase in query.phrases:
+            phrase_occurrences = self._count_phrase_occurrences(url, phrase)
+            score += 3.0 + (0.5 * phrase_occurrences)
+
+        if not query.phrases and len(query.terms) > 1:
+            phrase_occurrences = self._count_phrase_occurrences(url, query.terms)
+            if phrase_occurrences:
+                score += 2.0 + (0.25 * phrase_occurrences)
 
         return SearchResult(
             url=url,
             title=document.title,
             score=round(score, 6),
             matched_terms=matched_terms,
-            snippet=self._make_snippet(document.text, terms),
+            snippet=self._make_snippet(document.text, query.all_terms),
         )
 
     def _count_phrase_occurrences(self, url: str, terms: list[str]) -> int:
@@ -122,3 +167,13 @@ class SearchEngine:
             snippet = f"{snippet}..."
         return snippet
 
+
+def parse_query(query: str) -> Query:
+    """Parse unquoted terms and quoted exact phrases from a user query."""
+    phrases = [
+        tokenize(match.group(1))
+        for match in QUOTED_PHRASE_PATTERN.finditer(query)
+        if tokenize(match.group(1))
+    ]
+    without_phrases = QUOTED_PHRASE_PATTERN.sub(" ", query)
+    return Query(terms=tokenize(without_phrases), phrases=phrases)

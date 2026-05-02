@@ -11,6 +11,8 @@ This coursework was developed with assistance from OpenAI Codex/ChatGPT.
   live website.
 - Identifying edge cases worth testing, including empty queries, missing words,
   re-indexing the same URL, and politeness timing.
+- Highlighting higher-band improvements such as exact phrase search, query
+  suggestions, benchmarking, and CI evidence.
 
 ## What Needed Human Review
 
@@ -22,6 +24,9 @@ This coursework was developed with assistance from OpenAI Codex/ChatGPT.
   ordering without hiding the core inverted-index behaviour.
 - Generated code still needed manual inspection for maintainability, imports,
   error handling, and whether each part could be explained in the video.
+- AI suggestions for "advanced search" can become too broad. I kept the final
+  additions focused on features that directly use the inverted index: exact
+  phrase checks from stored positions and vocabulary-based suggestions.
 
 ## Impact on Learning
 
@@ -38,4 +43,3 @@ example, a crawler can appear correct while forgetting the 6 second delay, or a
 search function can return pages matching any query word rather than every word.
 All AI-assisted work must therefore be declared, reviewed, tested, and explained
 honestly.
-

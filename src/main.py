@@ -122,6 +122,11 @@ class SearchShell(cmd.Cmd):
         results = engine.find(query)
         if not results:
             print(f"No pages found for '{query}'.")
+            suggestions = engine.suggest_terms(query)
+            if suggestions:
+                print("Suggestions:")
+                for term, matches in suggestions.items():
+                    print(f"  {term}: {', '.join(matches)}")
             return
 
         print(f"Found {len(results)} page(s) for '{query}':")

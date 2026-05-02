@@ -1,5 +1,5 @@
 from src.indexer import InvertedIndex
-from src.search import SearchEngine
+from src.search import SearchEngine, parse_query
 
 
 def make_index() -> InvertedIndex:
@@ -74,3 +74,30 @@ def test_find_can_limit_results_and_handles_empty_document_text() -> None:
 
     assert len(engine.find("common", limit=1)) == 1
     assert engine._make_snippet("", ["common"]) == ""
+
+
+def test_parse_query_separates_terms_and_quoted_phrases() -> None:
+    query = parse_query('good "loyal friends" books')
+
+    assert query.terms == ["good", "books"]
+    assert query.phrases == [["loyal", "friends"]]
+    assert query.all_terms == ["good", "books", "loyal", "friends"]
+
+
+def test_quoted_phrase_requires_adjacent_terms() -> None:
+    index = InvertedIndex()
+    index.add_document("https://example.test/a/", "good loyal friends stay", "A")
+    index.add_document("https://example.test/b/", "good loyal and patient friends", "B")
+    engine = SearchEngine(index)
+
+    results = engine.find('"loyal friends"')
+
+    assert [result.url for result in results] == ["https://example.test/a/"]
+
+
+def test_suggest_terms_returns_close_indexed_words() -> None:
+    engine = SearchEngine(make_index())
+
+    suggestions = engine.suggest_terms("frends")
+
+    assert suggestions["frends"] == ["friends"]

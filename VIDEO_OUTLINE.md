@@ -8,7 +8,8 @@
 4. Run `print good`.
 5. Run `find indifference`.
 6. Run `find good friends`.
-7. Show edge cases: `find` and `print wordthatdoesnotexist`.
+7. Run `find "good friends"` to show exact phrase search.
+8. Show edge cases: `find`, `find frends`, and `print wordthatdoesnotexist`.
 
 ## 2:00-3:30 Code Walkthrough
 
@@ -17,8 +18,10 @@
 - `src/indexer.py`: tokenisation, inverted-index dictionary, frequency,
   positions, first position, density, and JSON save/load.
 - `src/search.py`: posting-list intersection, case-insensitive query
-  processing, TF-IDF inspired ranking, and phrase bonus.
+  processing, exact phrases, suggestions, TF-IDF inspired ranking, and phrase
+  bonus.
 - `src/main.py`: command shell and graceful user messages.
+- `benchmarks/benchmark_search.py`: query timing and index statistics.
 
 ## 3:30-4:00 Testing
 
@@ -27,10 +30,12 @@ Run:
 ```shell
 uv run pytest -q
 uv run pytest --cov=src --cov-report=term-missing
+uv run python benchmarks/benchmark_search.py --repeat 20
 ```
 
 Mention that network calls are mocked, and that politeness is tested with fake
-time so tests remain fast.
+time so tests remain fast. Point out that GitHub Actions runs the same test
+suite automatically.
 
 ## 4:00-4:30 Version Control
 
