@@ -13,9 +13,13 @@ that contain every word in a query.
 - Inverted index storing frequency, token positions, first position, and density.
 - Case-insensitive tokenisation and search.
 - Multi-word query support using AND semantics.
+- Quoted exact-phrase search, for example `find "good friends"`.
 - TF-IDF inspired ranking with an extra bonus for adjacent phrase matches.
+- Query suggestions for close misspellings when no pages are found.
 - JSON index persistence in `data/index.json`.
-- Unit tests for crawler, indexer, search, and shell behaviour.
+- Benchmark script for query timing and index statistics.
+- GitHub Actions workflow for automated tests and coverage.
+- Unit and end-to-end tests for crawler, indexer, search, and shell behaviour.
 
 ## Repository Structure
 
@@ -27,10 +31,15 @@ that contain every word in a query.
 │   ├── search.py
 │   └── main.py
 ├── tests/
+│   ├── test_cli_e2e.py
 │   ├── test_crawler.py
 │   ├── test_indexer.py
 │   ├── test_main.py
 │   └── test_search.py
+├── benchmarks/
+│   └── benchmark_search.py
+├── .github/workflows/
+│   └── tests.yml
 ├── data/
 │   └── index.json
 ├── AI_USAGE.md
@@ -102,7 +111,13 @@ Find pages containing one or more query terms:
 ```shell
 > find indifference
 > find good friends
+> find "good friends"
 ```
+
+Unquoted multi-word queries use AND semantics: every term must appear on the
+page, but the terms do not have to be adjacent. Quoted phrases require adjacent
+positions in the index, so `find "good friends"` is stricter than
+`find good friends`.
 
 The shell handles empty queries and missing words gracefully:
 
@@ -112,6 +127,15 @@ Please provide a non-empty search query.
 
 > print wordthatdoesnotexist
 No index entries found for 'wordthatdoesnotexist'.
+```
+
+For search queries with a likely typo, the shell suggests close indexed words:
+
+```shell
+> find frends
+No pages found for 'frends'.
+Suggestions:
+  frends: friends
 ```
 
 You can also run one command non-interactively:
@@ -148,6 +172,31 @@ The crawler separates fetching from indexing. That keeps network error handling
 inside `crawler.py`, tokenisation and storage inside `indexer.py`, and query
 processing inside `search.py`.
 
+## Complexity and Performance
+
+Let:
+
+- `D` be the number of indexed documents.
+- `T` be the number of unique terms.
+- `P(t)` be the posting list size for term `t`.
+- `Q` be the number of query terms.
+
+Index construction is linear in the number of tokens crawled, because each token
+is normalised once and appended to a posting list. A single-word lookup is
+approximately `O(1)` for the dictionary lookup plus `O(P(t))` to print results.
+For a multi-word query, search intersects posting-list URL sets, which is
+approximately `O(P(t1) + ... + P(tQ))`. Exact phrase checks use stored token
+positions, so they avoid scanning the original page text.
+
+Run the benchmark script against the saved index:
+
+```shell
+uv run python benchmarks/benchmark_search.py --repeat 100
+```
+
+The benchmark reports document count, vocabulary size, index load time, and
+average/best timings for representative queries.
+
 ## Testing
 
 Run the full test suite:
@@ -169,8 +218,10 @@ Testing strategy:
 - Indexer tests check tokenisation, frequencies, positions, replacement, and
   JSON persistence.
 - Search tests check case-insensitive lookup, multi-word AND queries, empty
-  inputs, missing terms, and phrase ranking.
+  inputs, missing terms, exact quoted phrases, suggestions, and phrase ranking.
 - CLI tests check that `load`, `print`, and `find` produce user-facing output.
+- End-to-end CLI tests run `python -m src.main` in a subprocess.
+- GitHub Actions runs tests and coverage automatically on push and pull request.
 
 ## Dependencies
 
