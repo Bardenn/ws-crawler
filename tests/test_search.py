@@ -1,5 +1,5 @@
 from src.indexer import InvertedIndex
-from src.search import SearchEngine, parse_query
+from src.search import SearchEngine, parse_query, stem_term
 
 
 def make_index() -> InvertedIndex:
@@ -84,6 +84,14 @@ def test_parse_query_separates_terms_and_quoted_phrases() -> None:
     assert query.all_terms == ["good", "books", "loyal", "friends"]
 
 
+def test_parse_query_removes_unquoted_stop_words_but_keeps_phrase_terms() -> None:
+    query = parse_query('the good and "the friends"')
+
+    assert query.terms == ["good"]
+    assert query.phrases == [["the", "friends"]]
+    assert parse_query("the and").terms == ["the", "and"]
+
+
 def test_quoted_phrase_requires_adjacent_terms() -> None:
     index = InvertedIndex()
     index.add_document("https://example.test/a/", "good loyal friends stay", "A")
@@ -101,3 +109,21 @@ def test_suggest_terms_returns_close_indexed_words() -> None:
     suggestions = engine.suggest_terms("frends")
 
     assert suggestions["frends"] == ["friends"]
+
+
+def test_stemming_expands_unquoted_query_terms() -> None:
+    index = InvertedIndex()
+    index.add_document("https://example.test/a/", "Good friends stay.", "A")
+    engine = SearchEngine(index)
+
+    results = engine.find("friend")
+
+    assert [result.url for result in results] == ["https://example.test/a/"]
+    assert results[0].matched_terms == ["friends"]
+    assert stem_term("friends") == "friend"
+
+
+def test_stop_words_do_not_block_unquoted_search() -> None:
+    engine = SearchEngine(make_index())
+
+    assert engine.find("the good and") == engine.find("good")

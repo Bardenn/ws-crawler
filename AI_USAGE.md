@@ -12,7 +12,7 @@ This coursework was developed with assistance from OpenAI Codex/ChatGPT.
 - Identifying edge cases worth testing, including empty queries, missing words,
   re-indexing the same URL, and politeness timing.
 - Highlighting higher-band improvements such as exact phrase search, query
-  suggestions, benchmarking, and CI evidence.
+  suggestions, stemming, stop-word handling, benchmarking, and CI evidence.
 
 ## What Needed Human Review
 
@@ -26,7 +26,8 @@ This coursework was developed with assistance from OpenAI Codex/ChatGPT.
   error handling, and whether each part could be explained in the video.
 - AI suggestions for "advanced search" can become too broad. I kept the final
   additions focused on features that directly use the inverted index: exact
-  phrase checks from stored positions and vocabulary-based suggestions.
+  phrase checks from stored positions, vocabulary-based suggestions, conservative
+  stemming, and unquoted stop-word filtering.
 
 ## Impact on Learning
 
