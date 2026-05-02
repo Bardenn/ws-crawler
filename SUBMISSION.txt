@@ -1,0 +1,27 @@
+COMP3011 Coursework 2 Submission
+
+Video demonstration link:
+[PASTE VIDEO LINK HERE]
+
+GitHub repository URL:
+https://github.com/Bardenn/ws-crawler
+
+Compiled index file:
+Included in the repository at data/index.json
+
+Release/tag:
+v1.0-coursework
+
+GenAI declaration:
+OpenAI Codex/ChatGPT was used to help interpret the brief, scaffold the
+implementation, suggest tests and edge cases, improve documentation, and review
+higher-band polish items. The code was reviewed, tested, and adapted to satisfy
+the coursework requirements. See AI_USAGE.md for the full critical evaluation.
+
+Submission checklist:
+- Video link permissions checked in an incognito/private browser window.
+- GitHub repository is accessible to markers.
+- data/index.json is present.
+- README.md includes installation, usage, testing, design, complexity, and
+  benchmark information.
+- Tests pass with uv run pytest --cov=src --cov-report=term-missing.

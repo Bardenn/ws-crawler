@@ -10,6 +10,35 @@ import re
 from .indexer import InvertedIndex, TermStats, tokenize
 
 QUOTED_PHRASE_PATTERN = re.compile(r'"([^"]+)"')
+STOP_WORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "by",
+    "for",
+    "from",
+    "has",
+    "he",
+    "in",
+    "is",
+    "it",
+    "its",
+    "of",
+    "on",
+    "or",
+    "that",
+    "the",
+    "to",
+    "was",
+    "were",
+    "with",
+    "you",
+    "your",
+}
 
 
 @dataclass(frozen=True)
@@ -48,6 +77,9 @@ class SearchEngine:
 
     def __init__(self, index: InvertedIndex) -> None:
         self.index = index
+        self._stem_to_terms: dict[str, list[str]] = {}
+        for term in index.terms:
+            self._stem_to_terms.setdefault(stem_term(term), []).append(term)
 
     def print_term(self, word: str) -> dict[str, TermStats]:
         """Return postings for a single word."""
@@ -60,20 +92,42 @@ class SearchEngine:
         if not terms:
             return []
 
-        posting_lists = [self.index.terms.get(term, {}) for term in terms]
-        if any(not postings for postings in posting_lists):
-            return []
-
-        candidate_urls = set(posting_lists[0])
-        for postings in posting_lists[1:]:
-            candidate_urls &= set(postings)
+        candidate_urls: set[str] | None = None
+        for term in parsed_query.terms:
+            variants = self._variants_for_term(term)
+            if not variants:
+                return []
+            urls_for_concept = {
+                url
+                for variant in variants
+                for url in self.index.terms.get(variant, {})
+            }
+            candidate_urls = (
+                urls_for_concept
+                if candidate_urls is None
+                else candidate_urls & urls_for_concept
+            )
 
         for phrase in parsed_query.phrases:
-            candidate_urls = {
+            phrase_postings = [self.index.terms.get(term, {}) for term in phrase]
+            if any(not postings for postings in phrase_postings):
+                return []
+            phrase_urls = set(phrase_postings[0])
+            for postings in phrase_postings[1:]:
+                phrase_urls &= set(postings)
+            phrase_urls = {
                 url
-                for url in candidate_urls
+                for url in phrase_urls
                 if self._count_phrase_occurrences(url, phrase) > 0
             }
+            candidate_urls = (
+                phrase_urls
+                if candidate_urls is None
+                else candidate_urls & phrase_urls
+            )
+
+        if candidate_urls is None:
+            return []
 
         results = [self._score_document(url, parsed_query) for url in candidate_urls]
         results.sort(key=lambda result: (-result.score, result.url))
@@ -84,7 +138,7 @@ class SearchEngine:
         suggestions: dict[str, list[str]] = {}
         vocabulary = list(self.index.terms)
         for term in parse_query(query).all_terms:
-            if term in self.index.terms:
+            if self._variants_for_term(term):
                 continue
             matches = get_close_matches(term, vocabulary, n=limit, cutoff=0.72)
             if matches:
@@ -97,21 +151,33 @@ class SearchEngine:
         matched_terms: list[str] = []
         total_docs = max(self.index.page_count, 1)
 
-        for term in query.all_terms:
-            stats = self.index.terms[term][url]
-            document_frequency = len(self.index.terms[term])
-            inverse_document_frequency = math.log(
-                (1 + total_docs) / (1 + document_frequency)
-            ) + 1
-            term_frequency = stats.frequency / max(document.token_count, 1)
-            score += term_frequency * inverse_document_frequency
-            matched_terms.append(term)
+        for term in query.terms:
+            for variant in self._variants_for_term(term):
+                stats = self.index.terms[variant].get(url)
+                if stats is None:
+                    continue
+                score += self._tf_idf(stats, variant, total_docs, document.token_count)
+                if variant not in matched_terms:
+                    matched_terms.append(variant)
+
+        for phrase in query.phrases:
+            for term in phrase:
+                stats = self.index.terms[term].get(url)
+                if stats is None:
+                    continue
+                score += self._tf_idf(stats, term, total_docs, document.token_count)
+                if term not in matched_terms:
+                    matched_terms.append(term)
 
         for phrase in query.phrases:
             phrase_occurrences = self._count_phrase_occurrences(url, phrase)
             score += 3.0 + (0.5 * phrase_occurrences)
 
-        if not query.phrases and len(query.terms) > 1:
+        if (
+            not query.phrases
+            and len(query.terms) > 1
+            and all(term in self.index.terms for term in query.terms)
+        ):
             phrase_occurrences = self._count_phrase_occurrences(url, query.terms)
             if phrase_occurrences:
                 score += 2.0 + (0.25 * phrase_occurrences)
@@ -123,6 +189,24 @@ class SearchEngine:
             matched_terms=matched_terms,
             snippet=self._make_snippet(document.text, query.all_terms),
         )
+
+    def _variants_for_term(self, term: str) -> list[str]:
+        variants = self._stem_to_terms.get(stem_term(term), [])
+        return sorted(variants, key=lambda variant: (variant != term, variant))
+
+    def _tf_idf(
+        self,
+        stats: TermStats,
+        term: str,
+        total_docs: int,
+        token_count: int,
+    ) -> float:
+        document_frequency = len(self.index.terms[term])
+        inverse_document_frequency = math.log(
+            (1 + total_docs) / (1 + document_frequency)
+        ) + 1
+        term_frequency = stats.frequency / max(token_count, 1)
+        return term_frequency * inverse_document_frequency
 
     def _count_phrase_occurrences(self, url: str, terms: list[str]) -> int:
         if len(terms) < 2:
@@ -176,4 +260,33 @@ def parse_query(query: str) -> Query:
         if tokenize(match.group(1))
     ]
     without_phrases = QUOTED_PHRASE_PATTERN.sub(" ", query)
-    return Query(terms=tokenize(without_phrases), phrases=phrases)
+    terms = _remove_stop_words(tokenize(without_phrases))
+    return Query(terms=terms, phrases=phrases)
+
+
+def stem_term(term: str) -> str:
+    """Return a conservative stem for query expansion.
+
+    This is deliberately small and dependency-free.  The index still stores the
+    original words; stemming is used only to expand unquoted query terms to close
+    vocabulary variants such as ``friend`` and ``friends``.
+    """
+    if len(term) <= 3:
+        return term
+    if len(term) > 4 and term.endswith("ies"):
+        return f"{term[:-3]}y"
+    if len(term) > 5 and term.endswith("ing"):
+        stem = term[:-3]
+        if len(stem) > 2 and stem[-1] == stem[-2]:
+            stem = stem[:-1]
+        return stem
+    if len(term) > 4 and term.endswith("ed"):
+        return term[:-2]
+    if term.endswith("s") and not term.endswith("ss"):
+        return term[:-1]
+    return term
+
+
+def _remove_stop_words(tokens: list[str]) -> list[str]:
+    filtered = [token for token in tokens if token not in STOP_WORDS]
+    return filtered or tokens

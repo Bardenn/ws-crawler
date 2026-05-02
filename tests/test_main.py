@@ -89,12 +89,80 @@ def test_shell_reports_missing_index_and_invalid_print_queries(capsys) -> None:
     shell = SearchShell()
 
     shell.onecmd("find good")
-    shell.index = InvertedIndex()
-    shell.engine = None
     shell.onecmd("print two words")
 
     output = capsys.readouterr().out
     assert "No index loaded" in output
+
+
+def test_shell_handles_invalid_build_arguments(capsys) -> None:
+    shell = SearchShell()
+
+    shell.onecmd("build --max-pages not-a-number")
+
+    assert "invalid int value" in capsys.readouterr().err
+
+
+def test_load_command_reports_missing_index(tmp_path: Path, capsys) -> None:
+    shell = SearchShell(index_path=tmp_path / "missing.json")
+
+    shell.onecmd("load")
+
+    assert "Run 'build' first" in capsys.readouterr().out
+
+
+def test_print_command_reports_invalid_query_after_load(tmp_path: Path, capsys) -> None:
+    index_path = tmp_path / "index.json"
+    index = InvertedIndex()
+    index.add_document("https://example.test/", "Good friends.", "Example")
+    index.save(index_path)
+
+    shell = SearchShell(index_path=index_path)
+    shell.onecmd("load")
+    shell.onecmd("print two words")
+
+    assert "Please provide exactly one word" in capsys.readouterr().out
+
+
+def test_print_command_outputs_existing_postings(tmp_path: Path, capsys) -> None:
+    index_path = tmp_path / "index.json"
+    index = InvertedIndex()
+    index.add_document("https://example.test/", "Good good friends.", "Example")
+    index.save(index_path)
+
+    shell = SearchShell(index_path=index_path)
+    shell.onecmd("load")
+    shell.onecmd("print good")
+
+    output = capsys.readouterr().out
+    assert "Inverted index for 'good'" in output
+    assert "frequency=2" in output
+    assert "positions=[0, 1]" in output
+
+
+def test_find_command_handles_empty_query_and_suggestions(tmp_path: Path, capsys) -> None:
+    index_path = tmp_path / "index.json"
+    index = InvertedIndex()
+    index.add_document("https://example.test/", "Good friends.", "Example")
+    index.save(index_path)
+
+    shell = SearchShell(index_path=index_path)
+    shell.onecmd("load")
+    shell.onecmd("find")
+    shell.onecmd("find frends")
+
+    output = capsys.readouterr().out
+    assert "Please provide a non-empty search query" in output
+    assert "Suggestions:" in output
+    assert "frends: friends" in output
+
+
+def test_shell_exit_quit_and_emptyline() -> None:
+    shell = SearchShell()
+
+    assert shell.onecmd("exit") is True
+    assert shell.onecmd("quit") is True
+    assert shell.emptyline() is None
 
 
 def test_main_rejects_fast_delay_for_target_site() -> None:
@@ -121,3 +189,15 @@ def test_main_auto_loads_for_single_find_command(tmp_path: Path, capsys) -> None
     output = capsys.readouterr().out
     assert "Loaded index with 1 pages" in output
     assert "Found 1 page(s)" in output
+
+
+def test_main_enters_interactive_shell(monkeypatch) -> None:
+    called = []
+
+    def fake_cmdloop(self) -> None:
+        called.append(self.index_path)
+
+    monkeypatch.setattr(SearchShell, "cmdloop", fake_cmdloop)
+
+    assert main([]) == 0
+    assert called == [Path("data/index.json")]
