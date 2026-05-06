@@ -179,9 +179,18 @@ class QuoteCrawler:
         if self._last_request_time is None:
             return
         elapsed = self.monotonic_fn() - self._last_request_time
-        remaining = self.politeness_delay - elapsed
+        remaining = self._effective_politeness_delay() - elapsed
         if remaining > 0:
             self.sleep_fn(remaining)
+
+    def _effective_politeness_delay(self) -> float:
+        delay = self.politeness_delay
+        if self._robots_parser is not None:
+            user_agent = self.session.headers.get("User-Agent", "*")
+            crawl_delay = self._robots_parser.crawl_delay(user_agent)
+            if crawl_delay is not None:
+                delay = max(delay, float(crawl_delay))
+        return delay
 
     def _is_internal_html_url(self, url: str) -> bool:
         parsed = urlparse(url)

@@ -92,6 +92,43 @@ def test_fetch_observes_politeness_window_between_requests() -> None:
     assert sleeps == [6.0]
 
 
+def test_fetch_respects_robots_crawl_delay_when_larger() -> None:
+    html = "<html><body>quote</body></html>"
+    session = FakeSession(
+        {
+            "https://quotes.toscrape.com/robots.txt": FakeResponse(
+                "User-agent: *\nCrawl-delay: 10",
+                "https://quotes.toscrape.com/robots.txt",
+                content_type="text/plain",
+            ),
+            "https://quotes.toscrape.com/": FakeResponse(
+                html, "https://quotes.toscrape.com/"
+            ),
+            "https://quotes.toscrape.com/page/2/": FakeResponse(
+                html, "https://quotes.toscrape.com/page/2/"
+            ),
+        }
+    )
+    current_time = [0.0]
+    sleeps: list[float] = []
+
+    def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        current_time[0] += seconds
+
+    crawler = QuoteCrawler(
+        politeness_delay=6.0,
+        session=session,
+        sleep_fn=sleep,
+        monotonic_fn=lambda: current_time[0],
+    )
+
+    crawler.fetch("https://quotes.toscrape.com/")
+    crawler.fetch("https://quotes.toscrape.com/page/2/")
+
+    assert sleeps == [10.0, 10.0]
+
+
 def test_crawl_visits_internal_pages_breadth_first() -> None:
     session = FakeSession(
         {
