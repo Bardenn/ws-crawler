@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import heapq
 import time
 from typing import Callable
+from urllib import robotparser
 from urllib.parse import urldefrag, urljoin, urlparse
 
 from bs4 import BeautifulSoup
@@ -53,6 +54,7 @@ class QuoteCrawler:
         self.monotonic_fn = monotonic_fn
         self._last_request_time: float | None = None
         self._base_netloc = urlparse(self.base_url).netloc
+        self._robots_parser: robotparser.RobotFileParser | None = None
         self.session.headers.update(
             {
                 "User-Agent": (
@@ -78,6 +80,12 @@ class QuoteCrawler:
             if url in visited:
                 continue
             visited.add(url)
+            if not self.is_allowed_by_robots(url):
+                if not pages and first_error is None:
+                    first_error = requests.RequestException(
+                        f"Blocked by robots.txt: {url}"
+                    )
+                continue
 
             try:
                 page = self.fetch(url)
@@ -99,6 +107,8 @@ class QuoteCrawler:
 
     def fetch(self, url: str) -> CrawledPage:
         """Fetch one page while observing the politeness delay."""
+        if not self.is_allowed_by_robots(url):
+            raise requests.RequestException(f"Blocked by robots.txt: {url}")
         self._wait_if_needed()
         response = self.session.get(url, timeout=self.timeout)
         self._last_request_time = self.monotonic_fn()
@@ -133,6 +143,37 @@ class QuoteCrawler:
             text=text,
             links=sorted(links, key=self._link_priority),
         )
+
+    def is_allowed_by_robots(self, url: str) -> bool:
+        """Return whether robots.txt permits this crawler to fetch the URL."""
+        parser = self._get_robots_parser()
+        user_agent = self.session.headers.get("User-Agent", "*")
+        return parser.can_fetch(user_agent, url)
+
+    def _get_robots_parser(self) -> robotparser.RobotFileParser:
+        if self._robots_parser is not None:
+            return self._robots_parser
+
+        robots_url = urljoin(self.base_url, "/robots.txt")
+        parser = robotparser.RobotFileParser(robots_url)
+        try:
+            self._wait_if_needed()
+            response = self.session.get(robots_url, timeout=self.timeout)
+            self._last_request_time = self.monotonic_fn()
+            if response.status_code in {401, 403}:
+                parser.disallow_all = True
+            elif 400 <= response.status_code < 500:
+                parser.parse([])
+            else:
+                response.raise_for_status()
+                parser.parse(response.text.splitlines())
+        except Exception:
+            # Be conservative about crawler reliability: if robots.txt cannot be
+            # retrieved or parsed, continue as though no rules were published.
+            parser.parse([])
+
+        self._robots_parser = parser
+        return parser
 
     def _wait_if_needed(self) -> None:
         if self._last_request_time is None:
