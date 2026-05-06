@@ -173,12 +173,12 @@ class SearchEngine:
             phrase_occurrences = self._count_phrase_occurrences(url, phrase)
             score += 3.0 + (0.5 * phrase_occurrences)
 
-        if (
-            not query.phrases
-            and len(query.terms) > 1
-            and all(term in self.index.terms for term in query.terms)
-        ):
+        if not query.phrases and len(query.terms) > 1:
             phrase_occurrences = self._count_phrase_occurrences(url, query.terms)
+            if not phrase_occurrences:
+                phrase_occurrences = self._count_variant_phrase_occurrences(
+                    url, query.terms
+                )
             if phrase_occurrences:
                 score += 2.0 + (0.25 * phrase_occurrences)
 
@@ -211,6 +211,8 @@ class SearchEngine:
     def _count_phrase_occurrences(self, url: str, terms: list[str]) -> int:
         if len(terms) < 2:
             return 0
+        if any(url not in self.index.terms.get(term, {}) for term in terms):
+            return 0
 
         first_positions = self.index.terms[terms[0]][url].positions
         other_position_sets = [
@@ -222,6 +224,30 @@ class SearchEngine:
             if all(
                 start + offset + 1 in positions
                 for offset, positions in enumerate(other_position_sets)
+            ):
+                occurrences += 1
+        return occurrences
+
+    def _count_variant_phrase_occurrences(self, url: str, terms: list[str]) -> int:
+        if len(terms) < 2:
+            return 0
+
+        position_sets: list[set[int]] = []
+        for term in terms:
+            positions: set[int] = set()
+            for variant in self._variants_for_term(term):
+                stats = self.index.terms[variant].get(url)
+                if stats is not None:
+                    positions.update(stats.positions)
+            if not positions:
+                return 0
+            position_sets.append(positions)
+
+        occurrences = 0
+        for start in position_sets[0]:
+            if all(
+                start + offset + 1 in positions
+                for offset, positions in enumerate(position_sets[1:])
             ):
                 occurrences += 1
         return occurrences

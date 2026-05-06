@@ -123,6 +123,18 @@ def test_stemming_expands_unquoted_query_terms() -> None:
     assert stem_term("friends") == "friend"
 
 
+def test_stemmed_multi_word_query_does_not_crash_phrase_bonus() -> None:
+    engine = SearchEngine(make_index())
+
+    results = engine.find("good friend")
+
+    assert [result.url for result in results] == [
+        "https://quotes.toscrape.com/page/1/",
+        "https://quotes.toscrape.com/page/2/",
+    ]
+    assert results[0].matched_terms == ["good", "friends"]
+
+
 def test_stop_words_do_not_block_unquoted_search() -> None:
     engine = SearchEngine(make_index())
 

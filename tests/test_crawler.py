@@ -92,9 +92,51 @@ def test_fetch_observes_politeness_window_between_requests() -> None:
     assert sleeps == [6.0]
 
 
+def test_fetch_respects_robots_crawl_delay_when_larger() -> None:
+    html = "<html><body>quote</body></html>"
+    session = FakeSession(
+        {
+            "https://quotes.toscrape.com/robots.txt": FakeResponse(
+                "User-agent: *\nCrawl-delay: 10",
+                "https://quotes.toscrape.com/robots.txt",
+                content_type="text/plain",
+            ),
+            "https://quotes.toscrape.com/": FakeResponse(
+                html, "https://quotes.toscrape.com/"
+            ),
+            "https://quotes.toscrape.com/page/2/": FakeResponse(
+                html, "https://quotes.toscrape.com/page/2/"
+            ),
+        }
+    )
+    current_time = [0.0]
+    sleeps: list[float] = []
+
+    def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        current_time[0] += seconds
+
+    crawler = QuoteCrawler(
+        politeness_delay=6.0,
+        session=session,
+        sleep_fn=sleep,
+        monotonic_fn=lambda: current_time[0],
+    )
+
+    crawler.fetch("https://quotes.toscrape.com/")
+    crawler.fetch("https://quotes.toscrape.com/page/2/")
+
+    assert sleeps == [10.0, 10.0]
+
+
 def test_crawl_visits_internal_pages_breadth_first() -> None:
     session = FakeSession(
         {
+            "https://quotes.toscrape.com/robots.txt": FakeResponse(
+                "User-agent: *\nAllow: /",
+                "https://quotes.toscrape.com/robots.txt",
+                content_type="text/plain",
+            ),
             "https://quotes.toscrape.com/": FakeResponse(
                 '<a href="/page/2/">next</a><p>home</p>',
                 "https://quotes.toscrape.com/",
@@ -118,6 +160,54 @@ def test_crawl_visits_internal_pages_breadth_first() -> None:
         "https://quotes.toscrape.com/page/2/",
         "https://quotes.toscrape.com/page/3/",
     ]
+
+
+def test_crawl_skips_pages_blocked_by_robots_txt() -> None:
+    session = FakeSession(
+        {
+            "https://quotes.toscrape.com/robots.txt": FakeResponse(
+                "User-agent: *\nDisallow: /page/2/",
+                "https://quotes.toscrape.com/robots.txt",
+                content_type="text/plain",
+            ),
+            "https://quotes.toscrape.com/": FakeResponse(
+                '<a href="/page/2/">blocked</a><p>home</p>',
+                "https://quotes.toscrape.com/",
+            ),
+            "https://quotes.toscrape.com/page/2/": FakeResponse(
+                "<p>should not be fetched</p>",
+                "https://quotes.toscrape.com/page/2/",
+            ),
+        }
+    )
+    crawler = QuoteCrawler(politeness_delay=0, max_pages=2, session=session)
+
+    pages = crawler.crawl()
+
+    assert [page.url for page in pages] == ["https://quotes.toscrape.com/"]
+    assert "https://quotes.toscrape.com/page/2/" not in session.requested_urls
+
+
+def test_fetch_rejects_page_blocked_by_robots_txt() -> None:
+    session = FakeSession(
+        {
+            "https://quotes.toscrape.com/robots.txt": FakeResponse(
+                "User-agent: *\nDisallow: /private/",
+                "https://quotes.toscrape.com/robots.txt",
+                content_type="text/plain",
+            ),
+            "https://quotes.toscrape.com/private/": FakeResponse(
+                "<p>private</p>",
+                "https://quotes.toscrape.com/private/",
+            ),
+        }
+    )
+    crawler = QuoteCrawler(politeness_delay=0, session=session)
+
+    with pytest.raises(requests.RequestException, match="robots.txt"):
+        crawler.fetch("https://quotes.toscrape.com/private/")
+
+    assert "https://quotes.toscrape.com/private/" not in session.requested_urls
 
 
 def test_crawl_raises_helpful_error_when_first_page_fails() -> None:
