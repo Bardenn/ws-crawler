@@ -10,7 +10,7 @@ Compiled index file:
 Included in the repository at data/index.json
 
 Release/tag:
-v1.0-coursework
+v1.1-coursework
 
 GenAI declaration:
 OpenAI Codex/ChatGPT was used to help interpret the brief, scaffold the
