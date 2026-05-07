@@ -65,10 +65,12 @@ Show:
 
 ```shell
 git log --oneline --decorate
+git tag --list --sort=-v:refname
 ```
 
 Explain that the work was built incrementally: core crawler, indexer, search,
-tests, documentation, and final verification.
+tests, documentation, and final verification. Mention that the current
+submission release is tagged as `v1.1-coursework`.
 
 ## 3:45-5:00 Critical GenAI Evaluation
 
